@@ -1,0 +1,10 @@
+# mkinitcpio preset for linux-riff
+
+ALL_kver="/boot/vmlinuz-linux-riff"
+
+PRESETS=('default' 'fallback')
+
+default_image="/boot/initramfs-linux-riff.img"
+
+fallback_image="/boot/initramfs-linux-riff-fallback.img"
+fallback_options="-S autodetect"
