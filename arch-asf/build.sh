@@ -147,6 +147,9 @@ cmd_install() {
   install_entry "${BOOT_TMPL_DIR}/linux-riff.conf.tmpl"          /boot/loader/entries/linux-riff.conf          "lockdown=integrity"
   install_entry "${BOOT_TMPL_DIR}/linux-riff-fallback.conf.tmpl" /boot/loader/entries/linux-riff-fallback.conf "lockdown=integrity"
   install_entry "${BOOT_TMPL_DIR}/linux-riff-relaxed.conf.tmpl"  /boot/loader/entries/linux-riff-relaxed.conf  ""
+  # max-perf: mitigations=off but lockdown=integrity + full LSM stack stay ON.
+  # Opt-in speed entry; the default secure entry is unchanged.
+  install_entry "${BOOT_TMPL_DIR}/linux-riff-maxperf.conf.tmpl"  /boot/loader/entries/linux-riff-maxperf.conf  "lockdown=integrity"
 
   log "install OK — entries written, default entry NOT modified"
   log "next: run arch-asf/verify.sh, then reboot and pick 'Arch Linux Riff'"
