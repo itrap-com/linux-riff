@@ -125,7 +125,17 @@ mode_runtime() {
   if [[ -d /sys/kernel/security/apparmor ]]; then ok "apparmor enabled"; else bad "apparmor not active"; fi
 
   sect "AMD-Vi / IOMMU"
-  if dmesg 2>/dev/null | grep -qi 'AMD-Vi.*enabled'; then ok "AMD-Vi enabled"; else bad "AMD-Vi not enabled (check dmesg)"; fi
+  # Prefer sysfs: dmesg is unreadable to non-root under dmesg_restrict (our
+  # hardening), so the old dmesg grep false-failed. /sys/class/iommu is the
+  # authoritative live state and is world-readable.
+  if compgen -G '/sys/class/iommu/ivhd*' >/dev/null 2>&1 \
+     || [[ -d /sys/kernel/iommu_groups && -n "$(ls -A /sys/kernel/iommu_groups 2>/dev/null)" ]]; then
+    ok "AMD-Vi enabled ($(ls /sys/kernel/iommu_groups 2>/dev/null | wc -l) IOMMU groups)"
+  elif dmesg 2>/dev/null | grep -qi 'AMD-Vi.*enabled'; then
+    ok "AMD-Vi enabled (via dmesg)"
+  else
+    bad "AMD-Vi not enabled (no /sys/class/iommu/ivhd*, no IOMMU groups)"
+  fi
 
   sect "amd-pstate-epp"
   if [[ -r /sys/devices/system/cpu/amd_pstate/status ]]; then
@@ -146,7 +156,15 @@ mode_runtime() {
   fi
 
   sect "ntsync device"
-  if [[ -c /dev/ntsync ]]; then ok "/dev/ntsync present"; else bad "/dev/ntsync missing (load ntsync module)"; fi
+  # CONFIG_NTSYNC=m — the module auto-loads on demand when Wine/Proton opens it,
+  # so a not-yet-loaded module is NOT a failure as long as it's installed.
+  if [[ -c /dev/ntsync ]]; then
+    ok "/dev/ntsync present (loaded)"
+  elif modinfo ntsync >/dev/null 2>&1; then
+    ok "ntsync module built, not loaded (auto-loads on demand; modprobe ntsync to force)"
+  else
+    bad "ntsync module missing from this kernel build"
+  fi
 
   sect "KFD compute"
   if [[ -d /sys/class/kfd ]] || [[ -c /dev/kfd ]]; then ok "kfd present"; else bad "kfd device missing"; fi
