@@ -3,3 +3,7 @@ last-diff.txt
 *.log
 .merged/
 profiles/
+
+# AutoFDO working artifacts (large; profile is regenerated per workload)
+autofdo/vmlinux.reference
+autofdo/riff.perf
