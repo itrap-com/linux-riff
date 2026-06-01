@@ -1,4 +1,4 @@
 title   Arch Linux Riff (-riff)
 linux   /vmlinuz-linux-riff
 initrd  /initramfs-linux-riff.img
-options @ROOT_OPTS@ @LSM_STACK@ @LOCKDOWN@
+options @ROOT_OPTS@ @LSM_STACK@ @LOCKDOWN@ amdgpu.ppfeaturemask=0xffffffff
