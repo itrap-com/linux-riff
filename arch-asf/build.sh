@@ -155,17 +155,43 @@ cmd_install() {
   log "next: run arch-asf/verify.sh, then reboot and pick 'Arch Linux Riff'"
 }
 
+# Derive the kernel root cmdline portably from THIS host (not a hardcoded
+# arch.conf — that's specific to one machine and breaks on a friend's box).
+# Order: explicit ROOT_OPTS override → host's systemd-boot default entry →
+# any non-riff loader entry → the running kernel's /proc/cmdline. Image- and
+# riff-managed tokens are stripped (the templates re-add lsm/lockdown/etc.).
+derive_root_opts() {
+  if [[ -n "${ROOT_OPTS:-}" ]]; then printf '%s' "${ROOT_OPTS}"; return 0; fi
+  local raw="" def="" cand
+  [[ -f /boot/loader/loader.conf ]] && def="$(awk '/^default/{print $2; exit}' /boot/loader/loader.conf)"
+  for cand in "/boot/loader/entries/${def}" /boot/loader/entries/*.conf; do
+    [[ -f "${cand}" ]] || continue
+    [[ "${cand}" == *linux-riff* ]] && continue   # don't seed from our own entries
+    raw="$(grep -E '^options ' "${cand}" 2>/dev/null | head -1 | sed -E 's/^options +//')"
+    [[ -n "${raw}" ]] && break
+  done
+  [[ -z "${raw}" ]] && raw="$(cat /proc/cmdline 2>/dev/null)"
+  # Strip image-specific + template-managed tokens; keep root=/rw/rootflags=/etc.
+  printf '%s' "${raw}" | tr ' ' '\n' | grep -vE \
+    '^(initrd=|BOOT_IMAGE=|lsm=|apparmor=|lockdown=|mitigations=|amdgpu\.ppfeaturemask=)' \
+    | paste -sd' '
+}
+
 # ----- boot entries (shared by install + entries) --------------------------
-# Regenerates the four riff loader entries from the templates in boot/. Derives
-# the root spec from the existing default arch.conf and NEVER writes arch.conf.
-# Used by both `install` (after a build) and `entries` (cmdline-only changes,
-# no rebuild/modules_install needed).
+# Regenerates the four riff loader entries from the templates in boot/. Never
+# writes the host's default entry. Portable across machines via derive_root_opts.
 write_boot_entries() {
+  if [[ ! -d /boot/loader/entries ]]; then
+    warn "no /boot/loader/entries — this host doesn't appear to use systemd-boot."
+    warn "kernel + modules + initramfs ARE installed; add a boot entry to your"
+    warn "bootloader manually. Linux: /boot/vmlinuz-linux-riff  initrd: /boot/initramfs-linux-riff.img"
+    warn "cmdline: $(derive_root_opts) lsm=landlock,lockdown,yama,integrity,apparmor,bpf apparmor=1 lockdown=integrity"
+    die  "no systemd-boot entries dir — see the manual cmdline above (set ROOT_OPTS=... to override the derived root spec)."
+  fi
   local root_opts
-  root_opts="$(grep -E '^options ' /boot/loader/entries/arch.conf \
-    | sed -E 's/^options +//; s/ +lsm=.*//; s/ +lockdown=[^ ]+//')"
-  if [[ -z "${root_opts}" ]]; then
-    die "could not derive root options from /boot/loader/entries/arch.conf"
+  root_opts="$(derive_root_opts)"
+  if [[ "${root_opts}" != *root=* ]]; then
+    die "could not derive a root= spec (no systemd-boot entry and /proc/cmdline lacks root=). Set it explicitly: sudo ROOT_OPTS='root=UUID=<your-root> rw rootflags=subvol=@' ./arch-asf/build.sh ${1:-install}"
   fi
   log "entries: root options = ${root_opts}"
 
