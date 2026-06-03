@@ -34,6 +34,14 @@ DST="/boot/loader/entries/linux-riff-maxperf.conf"
 TS="$(date +%Y%m%d-%H%M%S)"
 
 [[ -f "${TMPL}" ]]      || { echo "error: template not found: ${TMPL}" >&2; exit 1; }
+# This standalone helper is systemd-boot only. On GRUB, the max-perf variant is
+# emitted by the /etc/grub.d/42_linux-riff generator — use the main installer.
+if [[ ! -f "${ARCH_CONF}" ]] && { [[ -d /boot/grub ]] || [[ -d /boot/grub2 ]]; }; then
+  echo "error: this host uses GRUB, not systemd-boot." >&2
+  echo "       The max-perf entry is generated automatically on GRUB. Run:" >&2
+  echo "         sudo ${REPO_DIR}/arch-asf/build.sh entries" >&2
+  exit 1
+fi
 [[ -f "${ARCH_CONF}" ]] || { echo "error: ${ARCH_CONF} not found — cannot derive root spec" >&2; exit 1; }
 [[ -f /boot/vmlinuz-linux-riff ]]        || { echo "error: /boot/vmlinuz-linux-riff missing — build/install the kernel first" >&2; exit 1; }
 [[ -f /boot/initramfs-linux-riff.img ]]  || { echo "error: /boot/initramfs-linux-riff.img missing — run mkinitcpio first" >&2; exit 1; }

@@ -178,16 +178,26 @@ derive_root_opts() {
 }
 
 # ----- boot entries (shared by install + entries) --------------------------
-# Regenerates the four riff loader entries from the templates in boot/. Never
-# writes the host's default entry. Portable across machines via derive_root_opts.
+# Dispatch on the host's bootloader: systemd-boot (loader entries) or GRUB
+# (grub.d generator). Never writes the host's default/other-OS entries.
+# Portable across machines via derive_root_opts.
 write_boot_entries() {
-  if [[ ! -d /boot/loader/entries ]]; then
-    warn "no /boot/loader/entries — this host doesn't appear to use systemd-boot."
+  if [[ -d /boot/loader/entries ]]; then
+    write_sdboot_entries "$@"
+  elif command -v grub-mkconfig >/dev/null 2>&1 \
+       && { [[ -d /boot/grub ]] || [[ -d /boot/grub2 ]]; }; then
+    write_grub_entries "$@"
+  else
+    warn "no systemd-boot (/boot/loader/entries) and no GRUB (/boot/grub) found."
     warn "kernel + modules + initramfs ARE installed; add a boot entry to your"
     warn "bootloader manually. Linux: /boot/vmlinuz-linux-riff  initrd: /boot/initramfs-linux-riff.img"
     warn "cmdline: $(derive_root_opts) lsm=landlock,lockdown,yama,integrity,apparmor,bpf apparmor=1 lockdown=integrity"
-    die  "no systemd-boot entries dir — see the manual cmdline above (set ROOT_OPTS=... to override the derived root spec)."
+    die  "unrecognised bootloader — see the manual cmdline above (set ROOT_OPTS=... to override the derived root spec)."
   fi
+}
+
+# systemd-boot: regenerate the four riff loader entries from the boot/ templates.
+write_sdboot_entries() {
   local root_opts
   root_opts="$(derive_root_opts)"
   if [[ "${root_opts}" != *root=* ]]; then
@@ -214,6 +224,36 @@ write_boot_entries() {
   # max-perf: mitigations=off but lockdown=integrity + full LSM stack stay ON.
   # Opt-in speed entry; the default secure entry is unchanged.
   install_entry "${BOOT_TMPL_DIR}/linux-riff-maxperf.conf.tmpl"  /boot/loader/entries/linux-riff-maxperf.conf  "lockdown=integrity"
+}
+
+# GRUB: install the /etc/grub.d generator (with the host's root spec baked in)
+# and regenerate grub.cfg. The generator emits the same four riff variants as
+# the systemd-boot path and re-runs cleanly on later grub upgrades.
+write_grub_entries() {
+  local root_opts gen_src gen_dst grub_cfg
+  root_opts="$(derive_root_opts)"
+  if [[ "${root_opts}" != *root=* ]]; then
+    die "could not derive a root= spec (no usable boot entry and /proc/cmdline lacks root=). Set it explicitly: sudo ROOT_OPTS='root=UUID=<your-root> rw rootflags=subvol=@' ./arch-asf/build.sh ${1:-install}"
+  fi
+  log "entries(grub): root options = ${root_opts}"
+
+  gen_src="${BOOT_TMPL_DIR}/42_linux-riff.grub.tmpl"
+  gen_dst="/etc/grub.d/42_linux-riff"
+  [[ -f "${gen_src}" ]] || die "missing GRUB generator template: ${gen_src}"
+
+  sed -e "s|@ROOT_OPTS@|${root_opts}|g" "${gen_src}" > "${gen_dst}"
+  chmod 755 "${gen_dst}"
+  log "entries(grub): installed generator ${gen_dst}"
+
+  if   [[ -d /boot/grub ]];  then grub_cfg=/boot/grub/grub.cfg
+  elif [[ -d /boot/grub2 ]]; then grub_cfg=/boot/grub2/grub.cfg
+  else die "GRUB detected but neither /boot/grub nor /boot/grub2 exists"; fi
+
+  command -v grub-mkconfig >/dev/null 2>&1 \
+    || die "grub-mkconfig not found — install grub, then re-run: sudo ./arch-asf/build.sh entries"
+  log "entries(grub): regenerating ${grub_cfg}"
+  grub-mkconfig -o "${grub_cfg}"
+  log "entries(grub): done — pick an 'Arch Linux Riff — …' entry at boot"
 }
 
 # ----- entries -------------------------------------------------------------

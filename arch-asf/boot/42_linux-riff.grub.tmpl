@@ -1,0 +1,83 @@
+#!/bin/sh
+# 42_linux-riff — GRUB menu entries for the linux-riff (ASF) kernel.
+#
+# Installed to /etc/grub.d/42_linux-riff by arch-asf/build.sh on GRUB systems
+# (the systemd-boot equivalents live in arch-asf/boot/*.conf.tmpl). build.sh
+# substitutes @ROOT_OPTS@ with the host's derived root spec at install time, so
+# this generator is self-contained and re-runs correctly on every later
+# `grub-mkconfig` (e.g. pacman's grub upgrade hook).
+#
+# Regenerate the menu manually after a kernel or cmdline change with:
+#   sudo grub-mkconfig -o /boot/grub/grub.cfg
+#
+# The four entries mirror the systemd-boot templates exactly:
+#   secure   — lockdown=integrity + full LSM stack + GPU OC unlock   (the default)
+#   relaxed  — no lockdown (DKMS / unsigned modules allowed)
+#   max-perf — secure stack but mitigations=off (opt-in speed)
+#   fallback — secure stack on the fallback (all-modules) initramfs
+set -e
+
+prefix="/usr"
+exec_prefix="${prefix}"
+datarootdir="${prefix}/share"
+. "${datarootdir}/grub/grub-mkconfig_lib"
+
+KERNEL="/boot/vmlinuz-linux-riff"
+INITRD="/boot/initramfs-linux-riff.img"
+INITRD_FB="/boot/initramfs-linux-riff-fallback.img"
+
+# If the riff kernel isn't installed, emit nothing — never break grub-mkconfig.
+[ -e "$KERNEL" ] || exit 0
+
+# --- cmdline tokens (kept identical to arch-asf/boot/*.conf.tmpl) -----------
+ROOT_OPTS='@ROOT_OPTS@'
+LSM='lsm=landlock,lockdown,yama,integrity,apparmor,bpf apparmor=1'
+GPU='amdgpu.ppfeaturemask=0xffffffff'
+
+# Guard: refuse to emit a broken entry if the template was copied unconfigured.
+case "$ROOT_OPTS" in
+  *@ROOT_OPTS@*)
+    echo "42_linux-riff: not configured — run 'sudo arch-asf/build.sh install' on a GRUB host" >&2
+    exit 0 ;;
+esac
+
+CLASS="--class arch --class gnu-linux --class gnu --class os"
+
+# microcode initrd(s) — GRUB loads these before the main initramfs.
+UCODE=""
+for u in /boot/amd-ucode.img /boot/intel-ucode.img; do
+  [ -e "$u" ] && UCODE="${UCODE}${UCODE:+ }$u"
+done
+
+# Device prep for the filesystem holding the kernel (idiomatic, device-agnostic).
+boot_dev="$(${grub_probe} --target=device "$KERNEL")"
+prep="$(prepare_grub_to_access_device "$boot_dev")"
+rel_kernel="$(make_system_path_relative_to_its_root "$KERNEL")"
+
+emit() {
+  # $1=title  $2=id-suffix  $3=initrd-path  $4=extra-cmdline
+  _title="$1"; _id="$2"; _initrd="$3"; _extra="$4"
+  _rel_initrd="$(make_system_path_relative_to_its_root "$_initrd")"
+  _initrd_line=""
+  for u in $UCODE; do
+    _initrd_line="${_initrd_line} $(make_system_path_relative_to_its_root "$u")"
+  done
+  _initrd_line="${_initrd_line} ${_rel_initrd}"
+
+  cat <<EOF
+menuentry 'Arch Linux Riff — ${_title}' ${CLASS} \$menuentry_id_option 'linux-riff-${_id}' {
+    load_video
+    insmod gzio
+$(echo "$prep" | sed 's/^/    /')
+    echo 'Loading linux-riff (${_title}) ...'
+    linux ${rel_kernel} ${ROOT_OPTS} ${LSM} ${_extra}
+    echo 'Loading initramfs ...'
+    initrd${_initrd_line}
+}
+EOF
+}
+
+emit "secure"   "secure"   "$INITRD"    "lockdown=integrity ${GPU}"
+emit "relaxed"  "relaxed"  "$INITRD"    ""
+emit "max-perf" "maxperf"  "$INITRD"    "lockdown=integrity mitigations=off ${GPU}"
+emit "fallback" "fallback" "$INITRD_FB" "lockdown=integrity"
